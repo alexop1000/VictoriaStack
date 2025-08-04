@@ -1,0 +1,88 @@
+version: '3.8'
+
+# Extends the main docker-compose.yml for testing
+services:
+  # Test data generators - these services send sample data
+  metrics-generator:
+    container_name: metrics-generator
+    image: alpine:latest
+    depends_on:
+      - victoriametrics
+    command: |
+      sh -c '
+        apk add --no-cache curl
+        echo "Starting metrics generation..."
+        while true; do
+          TIMESTAMP=$$(expr $$(date +%s) \* 1000)
+          
+          # CPU usage metrics
+          curl -X POST "http://victoriametrics:8428/api/v1/import/prometheus" \
+            -H "Content-Type: text/plain" \
+            -d "cpu_usage{instance=\"test-server-1\",job=\"test\"} $$(expr $$RANDOM % 100) $$TIMESTAMP"
+          
+          # Memory usage metrics  
+          curl -X POST "http://victoriametrics:8428/api/v1/import/prometheus" \
+            -H "Content-Type: text/plain" \
+            -d "memory_usage{instance=\"test-server-1\",job=\"test\"} $$(expr $$RANDOM % 8000 + 2000) $$TIMESTAMP"
+          
+          # Request count metrics
+          curl -X POST "http://victoriametrics:8428/api/v1/import/prometheus" \
+            -H "Content-Type: text/plain" \
+            -d "http_requests_total{instance=\"test-server-1\",job=\"test\",method=\"GET\",status=\"200\"} $$(expr $$RANDOM % 1000) $$TIMESTAMP"
+          
+          # Response time metrics
+          curl -X POST "http://victoriametrics:8428/api/v1/import/prometheus" \
+            -H "Content-Type: text/plain" \
+            -d "http_request_duration_seconds{instance=\"test-server-1\",job=\"test\"} 0.$$(expr $$RANDOM % 999) $$TIMESTAMP"
+          
+          echo "Sent metrics batch at $$(date)"
+          sleep 10
+        done
+      '
+    restart: unless-stopped
+
+  logs-generator:
+    container_name: logs-generator
+    image: alpine:latest
+    depends_on:
+      - victorialogs
+    command: |
+      sh -c '
+        apk add --no-cache curl
+        echo "Starting logs generation..."
+        while true; do
+          # Generate different types of log messages
+          TIMESTAMP=$$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+          
+          # Application logs
+          curl -X POST "http://victorialogs:9428/insert/jsonline" \
+            -H "Content-Type: application/stream+json" \
+            -d "{\"_time\":\"$$TIMESTAMP\",\"level\":\"INFO\",\"service\":\"test-app\",\"message\":\"User login successful\",\"user_id\":\"user_$$(expr $$RANDOM % 1000)\"}"
+          
+          curl -X POST "http://victorialogs:9428/insert/jsonline" \
+            -H "Content-Type: application/stream+json" \
+            -d "{\"_time\":\"$$TIMESTAMP\",\"level\":\"DEBUG\",\"service\":\"test-app\",\"message\":\"Processing request\",\"request_id\":\"req_$$(expr $$RANDOM % 10000)\"}"
+          
+          # Error logs (less frequent)
+          if [ $$(expr $$RANDOM % 5) -eq 0 ]; then
+            curl -X POST "http://victorialogs:9428/insert/jsonline" \
+              -H "Content-Type: application/stream+json" \
+              -d "{\"_time\":\"$$TIMESTAMP\",\"level\":\"ERROR\",\"service\":\"test-app\",\"message\":\"Database connection failed\",\"error_code\":\"DB_CONN_FAIL\"}"
+          fi
+          
+          # Access logs
+          curl -X POST "http://victorialogs:9428/insert/jsonline" \
+            -H "Content-Type: application/stream+json" \
+            -d "{\"_time\":\"$$TIMESTAMP\",\"service\":\"nginx\",\"method\":\"GET\",\"path\":\"/api/v1/users\",\"status\":200,\"response_time\":0.$$(expr $$RANDOM % 999)}"
+          
+          echo "Sent logs batch at $$(date)"
+          sleep 5
+        done
+      '
+    restart: unless-stopped
+
+# Inherit volumes from main compose file
+volumes:
+  vm_data:
+  vl_data:
+  grafana_data:
