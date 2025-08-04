@@ -1,0 +1,46 @@
+services:
+  victoriametrics:
+    container_name: victoriametrics
+    image: victoriametrics/victoria-metrics:latest
+    ports:
+      - "8428:8428"
+    command:
+      - "--storageDataPath=/storage"
+      - "--httpListenAddr=:8428"
+      - "--retentionPeriod=12"
+    volumes:
+      - vm_data:/storage
+    restart: unless-stopped
+
+  victorialogs:
+    container_name: victorialogs
+    image: victoriametrics/victoria-logs:latest
+    ports:
+      - "9428:9428"
+    command:
+      - "--storageDataPath=/storage"
+      - "--httpListenAddr=:9428"
+    volumes:
+      - vl_data:/storage
+    restart: unless-stopped
+
+  grafana:
+    container_name: grafana
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=victoriametrics-metrics-datasource,victoriametrics-logs-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - victoriametrics
+      - victorialogs
+
+volumes:
+  vm_data:
+  vl_data:
+  grafana_data:
